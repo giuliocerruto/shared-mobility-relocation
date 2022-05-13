@@ -3,6 +3,7 @@ from pulp import *
 from mip import *
 import random
 import copy
+from math import e
 
 random.seed(27)
 
@@ -73,11 +74,8 @@ class RelocationOptimizer:
         if look_ahead_horizon < 0:
             raise ValueError('The look ahead horizon can\'t be negative')
 
-        if self.__time_frames_number < optimization_horizon:
+        if self.__time_frames_number < optimization_horizon + look_ahead_horizon:
             raise ValueError('Not enough time frame data are provided to optimize over the optimization horizon')
-
-        if optimization_horizon < look_ahead_horizon * 2 - 1:
-            raise ValueError('The optimization horizon should be at least 2 x look ahead horizon - 1')
 
         self.__look_ahead_horizon = look_ahead_horizon
         self.__optimization_horizon = optimization_horizon
@@ -94,11 +92,15 @@ class RelocationOptimizer:
         self.__mc_simulations = None
         self.__max_iterations = None
         self.__max_iterations_no_improvement = None
+        self.__relocation_solution = list()
+        self.__total_objective = 0
         self.__procedure_set = False
+        self.__total_outgoing_demand = np.sum(
+            [np.sum(self.__outgoing_demand[t]) for t in range(self.__optimization_horizon)])
 
     def set_optimization_procedure(self, initial_optimization_method: str = 'LP+rounding',
                                    perform_neighbourhood_search: bool = True,
-                                   next_state_simulation: str = 'Monte Carlo',
+                                   next_state_simulation: str = 'Monte_Carlo',
                                    max_seconds_same_incumbent: int = 60 * 60 * 3, mc_simulations: int = 50,
                                    max_iterations: int = 100, max_iterations_no_improvement: int = 10):
 
@@ -155,11 +157,17 @@ class RelocationOptimizer:
 
         for t in range(self.__optimization_horizon):
             r = self.__optimization_round(starting_time_frame=t, initial_state=current_system_state)
+            self.__relocation_solution.append(r)
 
-            # simula sistema
-            # ottieni prossimo stato e domanda soddisfatta
-            # aggiungii domanda soddisfatta al cumulo
-            # next_state diventa current state
+            # TODO oppure simulare sistema stile monte carlo o best case?
+            EO, EI = self.__single_tf_run(s=current_system_state, r=r, time_frame=t)
+            # EO, EI = self.__system_lp_problem(r=r, s=current_system_state, time_frame=t,
+            #                                   starting_time_frame=0)
+            # EO, EI = self.__round_flows(EO=EO, EI=EI, r=r, s=current_system_state)
+
+            self.__total_objective += sum(EO)
+
+            current_system_state = [current_system_state[i] - EO[i] + EI[i] + r[i] for i in range(self.__zones_number)]
 
     def __optimization_round(self, starting_time_frame: int, initial_state: list):
 
@@ -413,7 +421,8 @@ class RelocationOptimizer:
         while iters < self.__max_iterations and iters_no_improvement < self.__max_iterations_no_improvement:
             t = random.sample(range(self.__look_ahead_horizon), k=1)[0]
             incumbent_r, incumbent_objective, improved = self.__time_frame_search(t, incumbent_r, incumbent_objective,
-                                                                                  initial_state, starting_time_frame)
+                                                                                  initial_state, starting_time_frame,
+                                                                                  iters)
 
             if not improved:
                 iters_no_improvement += 1
@@ -424,16 +433,49 @@ class RelocationOptimizer:
 
         return incumbent_r
 
+    # FIRST IMPROVEMENT
+    # def __time_frame_search(self, t: int, incumbent_r: list, incumbent_objective: int, initial_state: list,
+    #                         starting_time_frame: int):
+    #
+    #     max_relocation_reached = np.sum([incumbent_r[t][k] for k in range(self.__zones_number) if
+    #                                      incumbent_r[t][k] > 0]) == self.__maximum_relocation
+    #
+    #     if max_relocation_reached:
+    #         pos_relocation_idx = [i for i in range(self.__zones_number) if incumbent_r[t][i] > 0]
+    #         neg_relocation_idx = [i for i in range(self.__zones_number) if incumbent_r[t][i] < 0]
+    #         zero_relocation_idx = [i for i in range(self.__zones_number) if incumbent_r[t][i] == 0]
+    #
+    #         indexes = list()
+    #         indexes.extend([(i, j) for i in pos_relocation_idx for j in pos_relocation_idx if j != i])
+    #         indexes.extend([(i, j) for i in zero_relocation_idx for j in pos_relocation_idx])
+    #         indexes.extend([(i, j) for i in neg_relocation_idx for j in range(self.__zones_number) if j != i])
+    #     else:
+    #         indexes = [(i, j) for i in range(self.__zones_number) for j in range(self.__zones_number) if j != 1]
+    #
+    #     random.shuffle(indexes)
+    #
+    #     for i, j in indexes:
+    #         r_copy = copy.deepcopy(incumbent_r)
+    #         r_copy[t][i] += 1
+    #         r_copy[t][j] -= 1
+    #
+    #         new_objective = self.__compute_objective(r_copy, initial_state, starting_time_frame)
+    #
+    #         if new_objective > incumbent_objective:
+    #             # print('improved! new objective is', new_objective)
+    #             return r_copy, new_objective, True
+    #     return incumbent_r, incumbent_objective, False
+
     def __time_frame_search(self, t: int, incumbent_r: list, incumbent_objective: int, initial_state: list,
-                            starting_time_frame: int):
+                            starting_time_frame: int, iteration: int):
 
         max_relocation_reached = np.sum([incumbent_r[t][k] for k in range(self.__zones_number) if
                                          incumbent_r[t][k] > 0]) == self.__maximum_relocation
 
         if max_relocation_reached:
-            pos_relocation_idx = [i for i in range(self.__zones_number) if incumbent_r[i] > 0]
-            neg_relocation_idx = [i for i in range(self.__zones_number) if incumbent_r[i] < 0]
-            zero_relocation_idx = [i for i in range(self.__zones_number) if incumbent_r[i] == 0]
+            pos_relocation_idx = [i for i in range(self.__zones_number) if incumbent_r[t][i] > 0]
+            neg_relocation_idx = [i for i in range(self.__zones_number) if incumbent_r[t][i] < 0]
+            zero_relocation_idx = [i for i in range(self.__zones_number) if incumbent_r[t][i] == 0]
 
             indexes = list()
             indexes.extend([(i, j) for i in pos_relocation_idx for j in pos_relocation_idx if j != i])
@@ -444,17 +486,39 @@ class RelocationOptimizer:
 
         random.shuffle(indexes)
 
-        for i, j in indexes:
+        sample_size = len(indexes)
+        look_up_sample_size = int(sample_size / e)
+
+        look_up_max = 0
+
+        for i, j in indexes[:look_up_sample_size]:
             r_copy = copy.deepcopy(incumbent_r)
             r_copy[t][i] += 1
             r_copy[t][j] -= 1
 
             new_objective = self.__compute_objective(r_copy, initial_state, starting_time_frame)
 
-            if new_objective > incumbent_objective:
+            if new_objective > look_up_max:
+                look_up_max = new_objective
+
+        for i, j in indexes[look_up_sample_size:]:
+            r_copy = copy.deepcopy(incumbent_r)
+            r_copy[t][i] += 1
+            r_copy[t][j] -= 1
+
+            new_objective = self.__compute_objective(r_copy, initial_state, starting_time_frame)
+
+            if new_objective > look_up_max:
                 # print('improved! new objective is', new_objective)
                 return r_copy, new_objective, True
+            elif np.random.binomial(1, self.__compute_acceptance_probability(iteration, new_objective, look_up_max)):
+                return r_copy, new_objective, True
+
         return incumbent_r, incumbent_objective, False
+
+    def __compute_acceptance_probability(self, iteration: int, new_objective: int, current_objective: int):
+        d = 10
+        return np.exp(-(new_objective - current_objective) / (d / np.log(iteration)))
 
     def __compute_objective(self, r: list, initial_state: list, starting_time_frame: int):
 
@@ -594,7 +658,8 @@ class RelocationOptimizer:
 
         while len(out_zones) > 0 and len(in_zones) > 0 and counter < 40:
             start_zone = random.sample(out_zones, k=1)[0]
-            arrival_zone = random.sample([j for j in range(self.__zones_number) if p[start_zone, j] > 0], k=1)[0]
+            arrival_zone = random.sample([j for j in range(self.__zones_number) if
+                                          self.__origin_destination_matrix[time_frame][start_zone, j] > 0], k=1)[0]
 
             if s_r[start_zone] > 0 and arrival_zone in in_zones:
                 s_r[start_zone] -= 1
@@ -615,3 +680,14 @@ class RelocationOptimizer:
                 counter += 1
 
         return outgoing, incoming
+
+    def get_optimal_relocation(self):
+        return self.__relocation_solution
+
+    def get_total_satisfied_demand(self):
+        return self.__total_objective
+
+    def result_summary(self):
+        percentage = self.__total_objective / self.__total_outgoing_demand
+        print(
+            f'The total satisfied demand is {self.__total_objective} out of {self.__total_outgoing_demand} ({percentage:.2%} efficiency)')
