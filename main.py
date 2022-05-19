@@ -1,6 +1,7 @@
 import numpy as np
 from RelocationOptimizer import RelocationOptimizer
 from TrafficFlowSimulator import TrafficFlowSimulator
+from StatisticsCollector import StatisticsCollector
 
 if __name__ == '__main__':
     N = 396  # total number of vehicles
@@ -17,8 +18,8 @@ if __name__ == '__main__':
                                origin_destination_matrix=p)
 
     ro = RelocationOptimizer(vehicle_number=N, maximum_relocation=R_max, incoming_demand=N_in, outgoing_demand=N_out,
-                             origin_destination_matrix=p, optimization_horizon=3, look_ahead_horizon=3,
-                             traffic_flow_simulator=tfs, verbose=True)
+                             origin_destination_matrix=p, optimization_horizon=2, look_ahead_horizon=2,
+                             traffic_flow_simulator=tfs, verbose=False)
 
     ro.set_optimization_procedure(initial_optimization_method='LP+rounding', perform_neighbourhood_search=False,
                                   next_state_simulation='best_case', max_seconds_same_incumbent=60 * 60 * 1,

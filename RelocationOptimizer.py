@@ -86,8 +86,8 @@ class RelocationOptimizer:
 
         self.__traffic_flow_simulator = traffic_flow_simulator
 
-        if verbose != 0 and verbose != 1:
-            raise ValueError('Verbose can be either 0 (deactivated) or 1 (activated)')
+        if not isinstance(verbose, bool):
+            raise ValueError('Verbose can be either False (deactivated) or True (activated)')
 
         self.__verbose = verbose
 
@@ -250,7 +250,7 @@ class RelocationOptimizer:
         if self.__initial_optimization_method == 'LP+rounding':
             r = self.__lp_problem(starting_time_frame=starting_time_frame, initial_state=initial_state)
 
-            r = self.__relocation_rounding(r=r, state=initial_state)
+            r = self.__relocation_rounding(r=r, initial_state=initial_state)
 
         elif self.__initial_optimization_method == 'MILP':
             r = self.__milp_problem(starting_time_frame=starting_time_frame, initial_state=initial_state)
@@ -279,7 +279,7 @@ class RelocationOptimizer:
 
         # declaring variables
         cat = 'Continuous'  # 'Integer' or 'Continuous'
-        s = [[LpVariable(name='s_' + str(i) + '_' + str(t), lowBound=0, cat=cat) if t != starting_time_frame else
+        s = [[LpVariable(name='s_' + str(i) + '_' + str(t), lowBound=0, cat=cat) if t != 0 else
               initial_state[i] for i in range(self.__zones_number)] for t in range(self.__look_ahead_horizon)]
         EI = [[LpVariable(name='EI_' + str(i) + '_' + str(t), lowBound=0,
                           upBound=self.__incoming_demand[t + starting_time_frame][i], cat=cat) for i in
@@ -334,7 +334,6 @@ class RelocationOptimizer:
         status = model.solve(PULP_CBC_CMD(msg=False))
 
         if status != 1:
-            print(initial_state)
             raise Exception('One optimization problem could not be solved')
 
         return [[r[t][i].value() for i in range(self.__zones_number)] for t in range(self.__look_ahead_horizon)]
@@ -349,7 +348,7 @@ class RelocationOptimizer:
         # declaring variables
         var_type = INTEGER  # INTEGER or CONTINUOUS
         s = [[model.add_var(name='s_' + str(i) + '_' + str(t), lb=0,
-                            var_type=CONTINUOUS) if t != starting_time_frame else initial_state[i] for i in
+                            var_type=CONTINUOUS) if t != 0 else initial_state[i] for i in
               range(self.__zones_number)] for t in range(self.__look_ahead_horizon)]
         EI = [[model.add_var(name='EI_' + str(i) + '_' + str(t), lb=0,
                              ub=self.__incoming_demand[t + starting_time_frame][i], var_type=CONTINUOUS) for i in
@@ -417,19 +416,24 @@ class RelocationOptimizer:
         model.verbose = 0
         status = model.optimize(max_seconds_same_incumbent=self.__max_seconds_same_incumbent)
 
+        if status != OptimizationStatus.OPTIMAL:
+            print(sum(initial_state), initial_state)
+            print(any([initial_state[i]<0 for i in range(self.__zones_number)]))
+            raise Exception('One optimization problem could not be solved')
+
         return [[r[t][i].x for i in range(self.__zones_number)] for t in range(self.__look_ahead_horizon)]
 
-    def __relocation_rounding(self, r: list, state: list) -> list:
+    def __relocation_rounding(self, r: list, initial_state: list) -> list:
 
         rounded_solution = list()
-        # TODO aggiungere modo per garantire non negatività di tutti gli stati dopo la relocation
+
         for t in range(self.__look_ahead_horizon):
             rounding = list(map(custom_round, r[t]))
 
             if t == 0:
                 for i in range(self.__zones_number):
-                    if state[i] + rounding[i] < 0:
-                        rounding[i] -= state[i] + rounding[i]
+                    if initial_state[i] + rounding[i] < 0:
+                        rounding[i] -= initial_state[i] + rounding[i]
 
             pos_rounded_indexes = [i for i in range(self.__zones_number) if
                                    (rounding[i] - r[t][i]) > TOLERANCE]  # identifying indexes of rounded entries
@@ -455,7 +459,7 @@ class RelocationOptimizer:
                 else:
                     ind = random.sample(range(self.__zones_number), k=1)[0]
 
-                if t == 0 and state[ind] + rounding[ind] > 0:
+                if t == 0 and initial_state[ind] + rounding[ind] > 0:
                     rounding[ind] -= 1
                 else:
                     rounding[ind] -= 1
@@ -469,10 +473,10 @@ class RelocationOptimizer:
                 else:
                     ind = random.sample(range(self.__zones_number), k=1)[0]
 
-                if t == 0 and state[ind] + rounding[ind] > 0:
-                    rounding[ind] -= 1
+                if t == 0 and initial_state[ind] + rounding[ind] > 0:
+                    rounding[ind] += 1
                 else:
-                    rounding[ind] -= 1
+                    rounding[ind] += 1
 
                 neg_excess -= 1
 
@@ -485,7 +489,7 @@ class RelocationOptimizer:
                 else:
                     ind = random.sample(range(self.__zones_number), k=1)[0]
 
-                if t == 0 and state[ind] + rounding[ind] > 0:
+                if t == 0 and initial_state[ind] + rounding[ind] > 0:
                     rounding[ind] -= 1
                 else:
                     rounding[ind] -= 1
@@ -499,10 +503,10 @@ class RelocationOptimizer:
                 else:
                     ind = random.sample(range(self.__zones_number), k=1)[0]
 
-                if t == 0 and state[ind] + rounding[ind] > 0:
-                    rounding[ind] -= 1
+                if t == 0 and initial_state[ind] + rounding[ind] > 0:
+                    rounding[ind] += 1
                 else:
-                    rounding[ind] -= 1
+                    rounding[ind] += 1
 
                 unbalance += 1
 
@@ -772,8 +776,6 @@ class RelocationOptimizer:
 
                 total_objective += sum(EO)
 
-                # s = [s[i] - EO[i] + EI[i] + r[time_frame][i] for i in range(self.__zones_number)]
-
         return total_objective / self.__mc_simulations
 
     def __single_tf_run(self, s: list, r: list, time_frame: int) -> (list, list):
@@ -825,18 +827,15 @@ class RelocationOptimizer:
         s_r = [s[i] + r[i] for i in range(self.__zones_number)]
 
         outgoing = [0] * self.__zones_number
-        incoming = [0] * self.__zones_number
-
-        counter = 0
 
         for start_zone, arrival_zone in flows:
-
+            a = s_r[start_zone]
+            b = s_r[arrival_zone]
             if s_r[start_zone] > 0:
                 s_r[start_zone] -= 1
                 s_r[arrival_zone] += 1
 
                 outgoing[start_zone] += 1
-                incoming[arrival_zone] += 1
 
         return s_r, np.sum(outgoing)
 
@@ -859,7 +858,7 @@ class RelocationOptimizer:
             print(f'\tThe optimization process took {self.__statistics.at[t, "elapsed_time"]:.0f} seconds')
             print()
 
-    def plot_relocation(self):
+    def plot_relocation(self, filename: str):
 
         df = pd.DataFrame(data=[[t, i, self.__relocation_solution[t][i], self.__relocation_solution[t][i] > 0] for i in
                                 range(self.__zones_number) for t in
@@ -872,6 +871,12 @@ class RelocationOptimizer:
                                                            title='Relocation by time-frame')
         p = p + p9.geom_point(p9.aes(color='pos_relocation'), show_legend=False, alpha=0.9) + p9.geom_hline(
             yintercept=0, linetype='dashed', alpha=0.7)
-        p9.ggsave(plot=p, filename='relocation_oh_' + str(self.__optimization_horizon) + '.png', device='png', dpi=320)
+        p9.ggsave(plot=p, filename=filename, device='png', dpi=320)
 
         return
+
+    def get_overall_statistics(self):
+        return self.__statistics[['efficiency', 'elapsed_time']].loc['overall']  # access by adding ['efficiency']
+
+    def get_statistics(self):
+        return self.__statistics[['efficiency', 'elapsed_time']]
