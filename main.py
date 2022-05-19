@@ -17,16 +17,18 @@ if __name__ == '__main__':
                                origin_destination_matrix=p)
 
     ro = RelocationOptimizer(vehicle_number=N, maximum_relocation=R_max, incoming_demand=N_in, outgoing_demand=N_out,
-                             origin_destination_matrix=p, optimization_horizon=5, look_ahead_horizon=3)
+                             origin_destination_matrix=p, optimization_horizon=3, look_ahead_horizon=3,
+                             traffic_flow_simulator=tfs, verbose=True)
 
-    ro.set_optimization_procedure(initial_optimization_method='LP+rounding', perform_neighbourhood_search=True,
-                                  next_state_simulation='best_case', max_seconds_same_incumbent=60 * 60 * 0.01,
-                                  mc_simulations=5, max_iterations=3, max_iterations_no_improvement=2)
+    ro.set_optimization_procedure(initial_optimization_method='LP+rounding', perform_neighbourhood_search=False,
+                                  next_state_simulation='best_case', max_seconds_same_incumbent=60 * 60 * 1,
+                                  mc_simulations=5, max_iterations=200, max_iterations_no_improvement=20)
 
     ro.optimize()
 
-    print(ro.get_optimal_relocation())
-    print(ro.get_total_satisfied_demand())
+    # print(ro.get_optimal_relocation())
+    # print(ro.get_total_satisfied_demand())
     ro.result_summary()
+    ro.plot_relocation()
 
     # TODO parallelizzare?
