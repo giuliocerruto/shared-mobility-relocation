@@ -19,9 +19,9 @@ if __name__ == '__main__':
 
     ro = RelocationOptimizer(vehicle_number=N, maximum_relocation=R_max, incoming_demand=N_in, outgoing_demand=N_out,
                              origin_destination_matrix=p, optimization_horizon=2, look_ahead_horizon=2,
-                             traffic_flow_simulator=tfs, verbose=False)
+                             traffic_flow_simulator=tfs, verbose=True)
 
-    ro.set_optimization_procedure(initial_optimization_method='LP+rounding', perform_neighbourhood_search=False,
+    ro.set_optimization_procedure(initial_optimization_method='LP+rounding', perform_neighbourhood_search=True,
                                   next_state_simulation='best_case', max_seconds_same_incumbent=60 * 60 * 1,
                                   mc_simulations=5, max_iterations=200, max_iterations_no_improvement=20)
 
@@ -31,5 +31,16 @@ if __name__ == '__main__':
     # print(ro.get_total_satisfied_demand())
     ro.result_summary()
     ro.plot_relocation()
+
+    # sc = StatisticsCollector(vehicle_number=N, maximum_relocation=R_max, incoming_demand=N_in, outgoing_demand=N_out,
+    #                          origin_destination_matrix=p, optimization_horizon_values=[10],
+    #                          look_ahead_horizon_values=range(1,4), initial_optimization_method='LP+rounding',
+    #                          perform_neighbourhood_search=False, next_state_simulation='best_case',
+    #                          max_seconds_same_incumbent=60 * 60 * 1, mc_simulations=5, max_iterations=200,
+    #                          max_iterations_no_improvement=20)
+    # sc.run()
+    # sc.plot_efficiency('results')
+    # sc.plot_elapsed_time('elapsed_time')
+    # sc.save_results('results')
 
     # TODO parallelizzare?

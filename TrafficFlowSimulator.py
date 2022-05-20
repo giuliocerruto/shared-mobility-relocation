@@ -52,6 +52,8 @@ class TrafficFlowSimulator:
 
         self.__simulate_system()
 
+        return
+
     def __simulate_system(self):
 
         print('Generating traffic flows...')
@@ -62,6 +64,8 @@ class TrafficFlowSimulator:
             self.__simulate_time_frame(t)
 
         print(f'Traffic flows generated ({time()-start_time:.0f} seconds)')
+
+        return
 
     def __simulate_time_frame(self, time_frame: int):
 
@@ -96,6 +100,8 @@ class TrafficFlowSimulator:
 
             else:
                 counter += 1
+
+        return
 
     def get_flow_by_time_frame(self, time_frame: int):
         return self.__time_frame_flows[time_frame]

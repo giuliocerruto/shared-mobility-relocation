@@ -99,7 +99,7 @@ class StatisticsCollector:
                                                              origin_destination_matrix=self.__origin_destination_matrix)
 
         self.__statistics = pd.DataFrame(
-            columns=['optimization horizon', 'look ahead horizon', 'time frame', 'efficiency', 'elapsed time'])
+            columns=['optimization_horizon', 'look_ahead_horizon', 'time_frame', 'efficiency', 'elapsed_time'])
 
         return
 
@@ -134,15 +134,51 @@ class StatisticsCollector:
                 ro.plot_relocation(
                     filename='relocation_oh_' + str(optimization_horizon) + '_lah_' + str(look_ahead_horizon))
 
-                stats = ro.get_overall_statistics()
+                stats = ro.get_statistics()
 
-                for index, row in stats[['efficiency', 'elapsed_time']].iterrows():
+                for index, row in stats.iterrows():
                     self.__statistics = self.__statistics.append(
-                        {'optimization horizon': optimization_horizon, 'look ahead horizon': look_ahead_horizon,
-                         'time frame': index, 'efficiency': row['efficiency'], 'elapsed time': row['elapsed_time']},
+                        {'optimization_horizon': int(optimization_horizon),
+                         'look_ahead_horizon': int(look_ahead_horizon),
+                         'time_frame': index, 'efficiency': float(row['efficiency']),
+                         'elapsed_time': float(row['elapsed_time'])},
                         ignore_index=True)
 
-    def plot_results(self):
+        return
 
-        
+    def plot_efficiency(self, filename: str):
 
+        p = p9.ggplot(self.__statistics) + p9.aes(x='look_ahead_horizon', y='efficiency')
+        p = p + p9.geom_boxplot(data=self.__statistics[self.__statistics['time_frame'] != 'overall'],
+                                mapping=p9.aes(group='look_ahead_horizon'), alpha=0.5, color='blue',
+                                fill='lightblue', width=0.3)
+
+        p = p + p9.geom_point(data=self.__statistics[self.__statistics['time_frame'] == 'overall'], color='indianred',
+                              size=4, alpha=1)
+        p = p + p9.geom_line(data=self.__statistics[self.__statistics['time_frame'] == 'overall'], linetype='-.',
+                             alpha=0.8)
+        p = p + p9.labs(x='look ahead horizon', y='efficiency', title='Efficiency by look ahead horizon')
+
+        p9.ggsave(plot=p, filename=filename, device='png', dpi=320)
+
+        return
+
+    def plot_elapsed_time(self, filename: str):
+
+        p = p9.ggplot(self.__statistics[self.__statistics['time_frame'] == 'overall']) + p9.aes(x='look_ahead_horizon',
+                                                                                                y='elapsed_time')
+        p = p + p9.geom_point(color='indianred', size=4, alpha=1)
+        p = p + p9.geom_line(linetype='-.', alpha=0.8)
+        p = p + p9.labs(x='look ahead horizon', y='elapsed time', title='Elapsed time by look ahead horizon')
+
+        p9.ggsave(plot=p, filename=filename, device='png', dpi=320)
+
+        return
+
+    def save_results(self, filename: str):
+
+        with open(filename + '.txt', 'w') as f:
+            for idx, row in self.__statistics.iterrows():
+                print(
+                    f'{self.__initial_optimization_method}; {self.__perform_neighbourhood_search}; {self.__next_state_simulation}; {row["optimization_horizon"]}; {row["look_ahead_horizon"]}; {row["time_frame"]}; {row["efficiency"]}; {row["elapsed_time"]}',
+                    file=f)

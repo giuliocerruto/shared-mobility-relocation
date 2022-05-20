@@ -91,6 +91,8 @@ class RelocationOptimizer:
 
         self.__verbose = verbose
 
+        self.__d = 0  # for cooling schedule in simulated annealing
+
         # variables to set the optimization procedure
         self.__initial_optimization_method = None
         self.__perform_neighbourhood_search = None
@@ -248,7 +250,7 @@ class RelocationOptimizer:
     def __initial_optimization(self, starting_time_frame: int, initial_state: list) -> list:
 
         if self.__initial_optimization_method == 'LP+rounding':
-            r = self.__lp_problem(starting_time_frame=starting_time_frame, initial_state=initial_state)
+            r, _ = self.__lp_problem(starting_time_frame=starting_time_frame, initial_state=initial_state)
 
             r = self.__relocation_rounding(r=r, initial_state=initial_state)
 
@@ -256,7 +258,7 @@ class RelocationOptimizer:
             r = self.__milp_problem(starting_time_frame=starting_time_frame, initial_state=initial_state)
 
         elif self.__initial_optimization_method == 'LP+MILP':
-            r = self.__lp_problem(starting_time_frame=starting_time_frame, initial_state=initial_state)
+            r, _ = self.__lp_problem(starting_time_frame=starting_time_frame, initial_state=initial_state)
 
             zero_relocation_list = list()
 
@@ -270,7 +272,8 @@ class RelocationOptimizer:
 
         return r
 
-    def __lp_problem(self, starting_time_frame: int, initial_state: list) -> list:
+    def __lp_problem(self, starting_time_frame: int, initial_state: list, fixed_relocation: dict = dict()) -> (
+    list, float):
 
         if self.__verbose:
             print('Solving LP problem')
@@ -288,8 +291,8 @@ class RelocationOptimizer:
                           upBound=self.__outgoing_demand[t + starting_time_frame][i], cat=cat) for i in
                range(self.__zones_number)] for t in range(self.__look_ahead_horizon)]
         r = [[LpVariable(name='r_' + str(i) + '_' + str(t), lowBound=-self.__maximum_relocation,
-                         upBound=self.__maximum_relocation, cat=cat) for i in range(self.__zones_number)] for t in
-             range(self.__look_ahead_horizon)]
+                         upBound=self.__maximum_relocation, cat=cat) if (t, i) not in fixed_relocation.keys() else
+              fixed_relocation[(t, i)] for i in range(self.__zones_number)] for t in range(self.__look_ahead_horizon)]
         w = [[LpVariable(name='w_' + str(i) + '_' + str(t), lowBound=0, cat=cat) for i in range(self.__zones_number)]
              for t in range(self.__look_ahead_horizon)]
 
@@ -336,7 +339,9 @@ class RelocationOptimizer:
         if status != 1:
             raise Exception('One optimization problem could not be solved')
 
-        return [[r[t][i].value() for i in range(self.__zones_number)] for t in range(self.__look_ahead_horizon)]
+        return [[r[t][i].value() if (t, i) not in fixed_relocation.keys() else r[t][i] for i in
+                 range(self.__zones_number)]
+                for t in range(self.__look_ahead_horizon)], model.objective.value()
 
     def __milp_problem(self, starting_time_frame: int, initial_state: list, fix_zero_relocation: list = None) -> list:
 
@@ -418,7 +423,7 @@ class RelocationOptimizer:
 
         if status != OptimizationStatus.OPTIMAL:
             print(sum(initial_state), initial_state)
-            print(any([initial_state[i]<0 for i in range(self.__zones_number)]))
+            print(any([initial_state[i] < 0 for i in range(self.__zones_number)]))
             raise Exception('One optimization problem could not be solved')
 
         return [[r[t][i].x for i in range(self.__zones_number)] for t in range(self.__look_ahead_horizon)]
@@ -534,8 +539,11 @@ class RelocationOptimizer:
                 print(
                     f'Performing iteration {iters + 1} on time-frame {starting_time_frame + t} ({time() - self.__statistics.at[starting_time_frame, "start_time"]:.0f} seconds)')
 
-            incumbent_r, incumbent_objective, improved = self.__time_frame_search(t, incumbent_r, incumbent_objective,
-                                                                                  initial_state, starting_time_frame)
+            incumbent_r, incumbent_objective, improved = self.__time_frame_search(t=t, incumbent_r=incumbent_r,
+                                                                                  incumbent_objective=incumbent_objective,
+                                                                                  initial_state=initial_state,
+                                                                                  starting_time_frame=starting_time_frame,
+                                                                                  iteration=iters)
 
             if not improved:
                 iters_no_improvement += 1
@@ -563,6 +571,11 @@ class RelocationOptimizer:
 
         max_relocation_reached = np.sum([incumbent_r[t][k] for k in range(self.__zones_number) if
                                          incumbent_r[t][k] > 0]) == self.__maximum_relocation
+
+        _, self.__d = self.__lp_problem(starting_time_frame=starting_time_frame, initial_state=initial_state,
+                                        fixed_relocation={(tf, i): incumbent_r[tf][i] for i in
+                                                          range(self.__zones_number)
+                                                          for tf in range(self.__look_ahead_horizon) if tf != t})
 
         if max_relocation_reached:
             pos_relocation_idx = [i for i in range(self.__zones_number) if incumbent_r[t][i] > 0]
@@ -670,8 +683,7 @@ class RelocationOptimizer:
     #     return incumbent_r, incumbent_objective, False
 
     def __compute_acceptance_probability(self, iteration: int, new_objective: float, current_objective: int) -> float:
-        d = 10  # TODO trovare valore ottimale (provare a risolvere lp per upper bound?)
-        return np.exp(-(new_objective - current_objective) / (d / np.log(iteration + 1)))
+        return np.exp(-(current_objective - new_objective) / (self.__d / np.log(iteration + 1)))
 
     def __compute_objective(self, r: list, initial_state: list, starting_time_frame: int) -> float:
 
